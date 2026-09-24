@@ -351,10 +351,19 @@ final class Browser: NSObject, ObservableObject {
         relist()
     }
 
+    /// Behind the same question as Show: a password on the clipboard can be
+    /// pasted anywhere, and the panel being open says nothing about who is
+    /// at the Mac. Kept to this Mac, off Universal Clipboard, and marked
+    /// concealed, so clipboard managers that honour it keep no history of it.
     func copy(_ login: Login) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(login.password, forType: .string)
-        announce("Password copied")
+        Vault.prove("copy the password for \(login.host)") { [weak self] ok in
+            guard ok else { return }
+            let board = NSPasteboard.general
+            board.prepareForNewContents(with: .currentHostOnly)
+            board.setString(login.password, forType: .string)
+            board.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+            self?.announce("Password copied")
+        }
     }
 
     /// What came back from another browser's store, put in the keychain.
