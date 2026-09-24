@@ -274,6 +274,8 @@ final class Browser: NSObject, ObservableObject {
     /// instant: clicking a row can take the caret out of the page first, and
     /// a list that vanished on the way down would never be clicked.
     private var lowering: DispatchWorkItem?
+    /// A page's request to open another app is on screen (see handOff).
+    private var handingOff = false
 
     func keepOffer() {
         guard let offer = offering else { return }
@@ -1828,7 +1830,7 @@ final class Browser: NSObject, ObservableObject {
 
 extension Browser: WKNavigationDelegate, WKUIDelegate {
     /// Links the window has no business showing — mail, calls, an app's own
-    /// scheme — are handed to whoever does own them.
+    /// scheme — are handed to whoever does own them, once you say so.
     func webView(
         _ webView: WKWebView,
         decidePolicyFor action: WKNavigationAction,
@@ -1908,8 +1910,39 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         if ["http", "https", "file", "about", "data", "blob", "chrome-extension", "webkit-extension"].contains(scheme) {
             decisionHandler(.allow)
         } else {
-            NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
+            handOff(url, from: webView, clicked: action.navigationType == .linkActivated)
+        }
+    }
+
+    /// An address for another app — zoommtg:, slack:, ssh:, smb: — goes to
+    /// that app only once you say so, as Safari and Chrome ask. Without the
+    /// question, any page, or an ad in a frame of it, could start any app
+    /// that answers to an address the moment it loads: join a call, open a
+    /// terminal to a host, mount a share. One question at a time; what a
+    /// page asks for while one is up is dropped, not stacked behind it. A
+    /// mailto: link you clicked goes straight to Mail, as everywhere else.
+    private func handOff(_ url: URL, from webView: WKWebView, clicked: Bool) {
+        guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else { return }
+        if clicked, url.scheme?.lowercased() == "mailto" {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        // A tab behind the one you are looking at doesn't get to ask over it.
+        guard !handingOff, tab(for: webView).map({ $0.id == activeID }) ?? true else { return }
+        handingOff = true
+        let name = app.deletingPathExtension().lastPathComponent
+        let alert = NSAlert()
+        alert.messageText = "Open \u{201C}\(name)\u{201D}?"
+        alert.informativeText = "\(webView.url?.host() ?? "This page") wants to open \(name)."
+        // Return opens nothing: with Cancel added first, AppKit gives it the
+        // escape key and leaves Open with no key at all, so opening takes a
+        // click. A page can ask the moment you press Return in its fields.
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Open")
+        Dialogs.show(alert, over: webView) { [weak self] answer in
+            self?.handingOff = false
+            if answer == .alertSecondButtonReturn { NSWorkspace.shared.open(url) }
         }
     }
 
