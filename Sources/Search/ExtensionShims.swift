@@ -2866,7 +2866,12 @@ enum ExtensionShims {
             if let inline = source["code"] as? String {
                 code += inline + "\n;\n"
             } else if let file = source["file"] as? String,
-                      let text = try? String(contentsOf: folder.appendingPathComponent(file.trimmingCharacters(in: CharacterSet(charactersIn: "/"))), encoding: .utf8) {
+                      // The extension names the file, and what is read is
+                      // written back into its own folder, where it can fetch
+                      // it: only a file of its own package, never `..` or a
+                      // link out to the rest of this Mac.
+                      let path = inside(file, of: folder),
+                      let text = try? String(contentsOf: path, encoding: .utf8) {
                 code += text + "\n;\n"
             }
         }
